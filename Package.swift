@@ -11,19 +11,20 @@ var dependencies: [Package.Dependency] = [
     .package(url: "https://github.com/steipete/Commander", from: "0.2.0"),
     .package(url: "https://github.com/apple/swift-crypto", from: "3.13.0"),
     .package(url: "https://github.com/apple/swift-log", from: "1.8.0"),
+    // swift-nio drives the LoopbackServer on every platform now. It also gives
+    // us NIOFoundationCompat for ByteBuffer ↔ Data conversion in the Linux
+    // HTTPTransport.
+    .package(url: "https://github.com/apple/swift-nio", from: "2.65.0"),
     .package(url: "https://github.com/pmatos/Swiftdansi", branch: "linux-isatty"),
     .package(url: "https://github.com/apple/swift-markdown", from: "0.7.3"),
     .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.10.0"),
 ]
 
 // AsyncHTTPClient is the HTTP backend on Linux. On macOS / iOS the platform's
-// URLSession is already strong enough so we don't pull NIO in there. swift-nio
-// is added explicitly so we can pull the `NIOFoundationCompat` product (the
-// AsyncHTTPClient package re-exports only a subset of NIO products).
+// URLSession is already strong enough so we don't pull NIO in there.
 #if !os(macOS) && !os(iOS)
     dependencies += [
         .package(url: "https://github.com/swift-server/async-http-client", from: "1.21.0"),
-        .package(url: "https://github.com/apple/swift-nio", from: "2.65.0"),
     ]
 #endif
 
@@ -61,6 +62,9 @@ var targets: [Target] = [
                 .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Markdown", package: "swift-markdown"),
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOHTTP1", package: "swift-nio"),
+                .product(name: "NIOPosix", package: "swift-nio"),
             ]
             #if !os(macOS) && !os(iOS)
                 deps += [
