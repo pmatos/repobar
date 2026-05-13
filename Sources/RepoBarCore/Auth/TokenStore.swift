@@ -164,16 +164,40 @@ extension TokenStore {
     }
 
     static func defaultFileDirectory() -> URL {
-        #if os(iOS)
+        #if os(Linux)
+            return Self.linuxDefaultFileDirectory()
+        #elseif os(iOS)
             let fallback = FileManager.default.temporaryDirectory
+            let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+                .first ?? fallback
+            return base
+                .appendingPathComponent("RepoBar", isDirectory: true)
+                .appendingPathComponent("DebugAuth", isDirectory: true)
         #else
             let fallback = FileManager.default.homeDirectoryForCurrentUser
+            let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+                .first ?? fallback
+            return base
+                .appendingPathComponent("RepoBar", isDirectory: true)
+                .appendingPathComponent("DebugAuth", isDirectory: true)
         #endif
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first ?? fallback
-        return base
-            .appendingPathComponent("RepoBar", isDirectory: true)
-            .appendingPathComponent("DebugAuth", isDirectory: true)
+    }
+
+    /// Linux path resolution: honour `XDG_DATA_HOME` and fall back to
+    /// `~/.local/share/repobar` when it is empty or unset. Public so tests can
+    /// drive the same logic without poking the environment further.
+    static func linuxDefaultFileDirectory() -> URL {
+        let env = ProcessInfo.processInfo.environment
+        let xdg = env["XDG_DATA_HOME"]?.trimmingCharacters(in: .whitespaces) ?? ""
+        let base: URL
+        if xdg.isEmpty {
+            base = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+                .appendingPathComponent(".local", isDirectory: true)
+                .appendingPathComponent("share", isDirectory: true)
+        } else {
+            base = URL(fileURLWithPath: xdg, isDirectory: true)
+        }
+        return base.appendingPathComponent("repobar", isDirectory: true)
     }
 }
 
@@ -330,6 +354,22 @@ private extension TokenStore {
     func loadFile(account: String, directory: URL) throws -> Data? {
         let url = self.fileURL(account: account, directory: directory)
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+
+        #if os(Linux)
+            // Refuse to read a token file that other users can read. On a shared
+            // host with `umask 022` the default for newly-created files is 0644,
+            // which is exactly the case we need to reject so a stale or
+            // copy-pasted token cannot be exfiltrated.
+            let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
+            let mode = (attrs[.posixPermissions] as? NSNumber)?.uint16Value ?? 0
+            // 0600 means 0o600; any bit outside owner-rw is a hard fail.
+            if mode & 0o077 != 0 {
+                self.logger.error(
+                    "token-store: refusing to read \(url.lastPathComponent) — permissions 0o\(String(mode, radix: 8)) are looser than 0o600"
+                )
+                throw TokenStoreError.loadFailed
+            }
+        #endif
 
         return try Data(contentsOf: url)
     }
