@@ -1,0 +1,101 @@
+name: Upstream sync
+
+on:
+  schedule:
+    # Weekly on Monday 04:00 UTC. The cron job is best-effort: GitHub may skip
+    # runs during high load, which is fine for this workflow.
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  rebase:
+    name: Rebase linux onto upstream/main
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout linux
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: linux
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: Add upstream remote
+        run: git remote add upstream https://github.com/steipete/RepoBar
+
+      - name: Run upstream-sync
+        id: sync
+        run: |
+          OUTPUT="$(Scripts/upstream-sync.sh)"
+          echo "$OUTPUT"
+          echo "$OUTPUT" >> "$GITHUB_OUTPUT"
+
+      - name: Push rebased linux
+        if: steps.sync.outputs.result == 'clean'
+        run: git push --force-with-lease origin linux
+
+      - name: Open tracking issue on conflict
+        if: steps.sync.outputs.result == 'conflict'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const today = new Date().toISOString().slice(0, 10);
+            const title = `Upstream rebase conflict on ${today}`;
+            const labels = ['upstream-sync'];
+
+            // Coalesce: if a conflict issue is already open, just bump it.
+            const existing = await github.paginate(
+              github.rest.issues.listForRepo,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                labels: labels.join(','),
+              }
+            );
+
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `Automated rebase of \`linux\` onto \`upstream/main\` produced conflicts and was aborted. Resolve manually:\n\n` +
+              `\`\`\`\ngit fetch upstream\ngit switch linux\ngit rebase upstream/main\n# resolve conflicts...\ngit push --force-with-lease origin linux\n\`\`\`\n\n` +
+              `Workflow run: ${runUrl}`;
+
+            if (existing.length > 0) {
+              const issue = existing[0];
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `Recurring conflict, see run ${runUrl}.`,
+              });
+              core.info(`Reused open conflict issue #${issue.number}`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                labels,
+                body,
+              });
+              core.info(`Opened conflict issue #${created.data.number}`);
+            }
+
+  test-script:
+    name: Test upstream-sync.sh
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Run test driver
+        run: Scripts/upstream-sync.test.sh
