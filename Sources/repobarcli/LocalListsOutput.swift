@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import RepoBarCore
 
@@ -131,3 +132,4 @@ func localWorktreesTableLines(
 
     return lines
 }
+#endif

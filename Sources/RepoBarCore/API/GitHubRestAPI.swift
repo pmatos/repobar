@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
+
 struct ActivitySnapshot {
     let events: [ActivityEvent]
     let latest: ActivityEvent?

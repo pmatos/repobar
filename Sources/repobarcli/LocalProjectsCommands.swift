@@ -1,3 +1,4 @@
+#if os(macOS)
 import Commander
 import Foundation
 import RepoBarCore
@@ -201,3 +202,4 @@ private func localStateLabel(_ status: LocalRepoStatus) -> String {
         "?"
     }
 }
+#endif

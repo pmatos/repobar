@@ -19,7 +19,15 @@ public enum PathFormatter {
                 return "~" + path.dropFirst(base.count)
             }
         }
-        return NSString(string: path).abbreviatingWithTildeInPath
+        #if canImport(Darwin)
+            return NSString(string: path).abbreviatingWithTildeInPath
+        #else
+            // swift-corelibs-foundation lacks `abbreviatingWithTildeInPath`.
+            // We've already checked every known home directory above; on Linux
+            // there is no extra system magic to reproduce — return the path
+            // as-is.
+            return path
+        #endif
     }
 
     public static func displayString(_ path: String) -> String {

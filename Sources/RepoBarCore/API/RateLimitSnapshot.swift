@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
+
 public struct RateLimitSnapshot: Sendable {
     public let resource: String?
     public let limit: Int?

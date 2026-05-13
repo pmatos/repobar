@@ -1,5 +1,11 @@
 import Commander
-import Darwin
+#if canImport(Darwin)
+    import Darwin
+#elseif canImport(Glibc)
+    import Glibc
+#elseif canImport(Musl)
+    import Musl
+#endif
 import Foundation
 import RepoBarCore
 
@@ -133,13 +139,13 @@ enum Ansi {
     static let oscTerminator = "\u{001B}\\"
 
     static var supportsColor: Bool {
-        guard isatty(fileno(stdout)) != 0 else { return false }
+        guard isatty(FileHandle.standardOutput.fileDescriptor) != 0 else { return false }
 
         return ProcessInfo.processInfo.environment["NO_COLOR"] == nil
     }
 
     static var supportsLinks: Bool {
-        isatty(fileno(stdout)) != 0
+        isatty(FileHandle.standardOutput.fileDescriptor) != 0
     }
 
     struct Code {

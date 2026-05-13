@@ -1,6 +1,9 @@
 import Foundation
 import Logging
-import Security
+
+#if canImport(Security)
+    import Security
+#endif
 
 public struct OAuthTokens: Codable, Equatable, Sendable {
     public let accessToken: String
@@ -117,31 +120,47 @@ extension TokenStore {
                 return groups.first(where: { $0.hasSuffix(Self.sharedAccessGroupSuffix) })
             }
             return nil
-        #else
+        #elseif os(iOS)
             if let group = Bundle.main.object(forInfoDictionaryKey: "RepoBarKeychainAccessGroup") as? String {
                 if group.isEmpty == false {
                     return group
                 }
             }
             return nil
+        #else
+            return nil
         #endif
     }
 
     static func defaultStorage() -> TokenStoreStorage {
-        let configured = ProcessInfo.processInfo.environment[Self.storageModeEnvKey]
-            ?? Bundle.main.object(forInfoDictionaryKey: Self.storageModeInfoKey) as? String
-        switch configured?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "file", "disk":
+        #if !canImport(Security)
+            // Linux: no Keychain available; always use file storage. Honour the
+            // env var only for forcing `.file` (the explicit "keychain" value is
+            // ignored with a logged warning because we cannot honour it).
+            let configured = ProcessInfo.processInfo.environment[Self.storageModeEnvKey]?
+                .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if configured == "keychain" {
+                RepoBarLogging.logger("token-store").warning(
+                    "REPOBAR_TOKEN_STORE=keychain ignored on this platform; using file storage"
+                )
+            }
             return .file(Self.defaultFileDirectory())
-        case "keychain":
-            return .keychain
-        default:
-            #if DEBUG
+        #else
+            let configured = ProcessInfo.processInfo.environment[Self.storageModeEnvKey]
+                ?? Bundle.main.object(forInfoDictionaryKey: Self.storageModeInfoKey) as? String
+            switch configured?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case "file", "disk":
                 return .file(Self.defaultFileDirectory())
-            #else
+            case "keychain":
                 return .keychain
-            #endif
-        }
+            default:
+                #if DEBUG
+                    return .file(Self.defaultFileDirectory())
+                #else
+                    return .keychain
+                #endif
+            }
+        #endif
     }
 
     static func defaultFileDirectory() -> URL {
@@ -165,6 +184,45 @@ private extension TokenStore {
             return
         }
 
+        #if canImport(Security)
+            try self.saveKeychain(data: data, account: account)
+        #else
+            // Unreachable on Linux because defaultStorage() always returns .file.
+            // Belt-and-braces: if a caller constructed with .keychain explicitly,
+            // we still fail loud rather than silently dropping the token.
+            self.logger.error("token-store: keychain storage requested on a platform without Security; failing")
+            throw TokenStoreError.saveFailed
+        #endif
+    }
+
+    func loadData(account: String) throws -> Data? {
+        if case let .file(directory) = self.storage {
+            return try self.loadFile(account: account, directory: directory)
+        }
+
+        #if canImport(Security)
+            return try self.loadKeychain(account: account)
+        #else
+            self.logger.error("token-store: keychain storage requested on a platform without Security; failing")
+            throw TokenStoreError.loadFailed
+        #endif
+    }
+
+    func clear(account: String) {
+        if case let .file(directory) = self.storage {
+            try? FileManager.default.removeItem(at: self.fileURL(account: account, directory: directory))
+            return
+        }
+
+        #if canImport(Security)
+            self.clearKeychain(account: account)
+        #endif
+    }
+}
+
+#if canImport(Security)
+private extension TokenStore {
+    func saveKeychain(data: Data, account: String) throws {
         let accessGroups = self.accessGroupsForOperation()
         var lastStatus: OSStatus = errSecSuccess
         for (index, group) in accessGroups.enumerated() {
@@ -187,11 +245,7 @@ private extension TokenStore {
         throw TokenStoreError.saveFailed
     }
 
-    func loadData(account: String) throws -> Data? {
-        if case let .file(directory) = self.storage {
-            return try self.loadFile(account: account, directory: directory)
-        }
-
+    func loadKeychain(account: String) throws -> Data? {
         let accessGroups = self.accessGroupsForOperation()
         var lastStatus: OSStatus = errSecSuccess
         for (index, group) in accessGroups.enumerated() {
@@ -214,12 +268,7 @@ private extension TokenStore {
         throw TokenStoreError.loadFailed
     }
 
-    func clear(account: String) {
-        if case let .file(directory) = self.storage {
-            try? FileManager.default.removeItem(at: self.fileURL(account: account, directory: directory))
-            return
-        }
-
+    func clearKeychain(account: String) {
         let accessGroups = self.accessGroupsForOperation()
         for group in accessGroups {
             let query = self.baseQuery(account: account, accessGroup: group)
@@ -266,6 +315,10 @@ private extension TokenStore {
             self.logger.error("Keychain \(action) failed: OSStatus \(status)")
         }
     }
+}
+#endif
+
+private extension TokenStore {
 
     func saveFile(data: Data, account: String, directory: URL) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
+
 public struct OAuthTokenRefresher: Sendable {
     private let tokenStore: TokenStore
     private let load: @Sendable (URLRequest) async throws -> (Data, URLResponse)

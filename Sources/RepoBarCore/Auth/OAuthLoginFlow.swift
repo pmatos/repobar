@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
+
 @MainActor
 protocol LoopbackServing: AnyObject {
     func start() throws -> URL

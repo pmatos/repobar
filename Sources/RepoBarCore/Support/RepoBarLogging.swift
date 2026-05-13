@@ -1,6 +1,9 @@
 import Foundation
 import Logging
-import os
+
+#if canImport(os)
+    import os
+#endif
 
 public enum LogVerbosity: String, CaseIterable, Codable, Equatable {
     case error
@@ -100,9 +103,11 @@ private final class LogState: @unchecked Sendable {
         self.lock.unlock()
     }
 
-    func osLogger(category: String) -> os.Logger {
-        os.Logger(subsystem: self.subsystem, category: category)
-    }
+    #if canImport(os)
+        func osLogger(category: String) -> os.Logger {
+            os.Logger(subsystem: self.subsystem, category: category)
+        }
+    #endif
 
     func logToFile(_ line: String) {
         self.lock.lock()
@@ -169,13 +174,17 @@ private struct RepoBarLogHandler: LogHandler {
     var metadataProvider: Logging.Logger.MetadataProvider?
 
     private let state: LogState
-    private let osLogger: os.Logger
+    #if canImport(os)
+        private let osLogger: os.Logger
+    #endif
 
     init(label: String, state: LogState, metadataProvider: Logging.Logger.MetadataProvider? = nil) {
         self.label = label
         self.state = state
         self.metadataProvider = metadataProvider
-        self.osLogger = state.osLogger(category: label)
+        #if canImport(os)
+            self.osLogger = state.osLogger(category: label)
+        #endif
     }
 
     subscript(metadataKey key: String) -> Logging.Logger.Metadata.Value? {
@@ -186,7 +195,13 @@ private struct RepoBarLogHandler: LogHandler {
     func log(event: Logging.LogEvent) {
         let combined = self.mergedMetadata(extra: event.metadata)
         let renderedMessage = self.renderMessage(event.message, metadata: combined)
-        self.osLogger.log(level: self.osLogType(for: event.level), "\(renderedMessage, privacy: .public)")
+        #if canImport(os)
+            self.osLogger.log(level: self.osLogType(for: event.level), "\(renderedMessage, privacy: .public)")
+        #else
+            // Linux: write to stderr so log output isn't lost when file logging
+            // is disabled.
+            FileHandle.standardError.write(Data((renderedMessage + "\n").utf8))
+        #endif
         let fileLine = self.renderFileLine(level: event.level, message: renderedMessage)
         self.state.logToFile(fileLine)
     }
@@ -233,18 +248,20 @@ private struct RepoBarLogHandler: LogHandler {
         }
     }
 
-    private func osLogType(for level: Logging.Logger.Level) -> OSLogType {
-        switch level {
-        case .trace, .debug:
-            .debug
-        case .info, .notice:
-            .info
-        case .warning:
-            .default
-        case .error:
-            .error
-        case .critical:
-            .fault
+    #if canImport(os)
+        private func osLogType(for level: Logging.Logger.Level) -> OSLogType {
+            switch level {
+            case .trace, .debug:
+                .debug
+            case .info, .notice:
+                .info
+            case .warning:
+                .default
+            case .error:
+                .error
+            case .critical:
+                .fault
+            }
         }
-    }
+    #endif
 }

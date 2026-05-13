@@ -1,0 +1,85 @@
+name: Linux build
+
+on:
+  push:
+    branches: [linux]
+  pull_request:
+    branches: [linux]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: swift build (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ubuntu:22.04
+            tag: ubuntu-22.04
+          - image: ubuntu:24.04
+            tag: ubuntu-24.04
+          - image: archlinux:latest
+            tag: arch
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - name: Install prerequisites (ubuntu)
+        if: startsWith(matrix.image, 'ubuntu')
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            binutils ca-certificates curl git gnupg libcurl4 libedit2 libncurses6 \
+            libpython3-dev libsqlite3-0 libxml2 libz3-dev pkg-config tzdata unzip \
+            zlib1g-dev
+          if [ "${{ matrix.tag }}" = "ubuntu-22.04" ]; then
+            apt-get install -y --no-install-recommends libgcc-11-dev libstdc++-11-dev
+          else
+            apt-get install -y --no-install-recommends libgcc-13-dev libstdc++-13-dev
+          fi
+
+      - name: Install prerequisites (arch)
+        if: startsWith(matrix.image, 'archlinux')
+        run: |
+          pacman -Sy --noconfirm --needed \
+            base-devel ca-certificates curl gcc git icu libedit libxml2 ncurses \
+            python sqlite tar unzip zlib
+
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Install Swift 6.2
+        run: |
+          set -e
+          url="https://download.swift.org/swift-6.2-release/ubuntu2404/swift-6.2-RELEASE/swift-6.2-RELEASE-ubuntu24.04.tar.gz"
+          if [ "${{ matrix.tag }}" = "ubuntu-22.04" ]; then
+            url="https://download.swift.org/swift-6.2-release/ubuntu2204/swift-6.2-RELEASE/swift-6.2-RELEASE-ubuntu22.04.tar.gz"
+          fi
+          mkdir -p "$HOME/.swift/swift-6.2-RELEASE"
+          curl --fail --location --silent --show-error "$url" \
+            | tar -xz -C "$HOME/.swift/swift-6.2-RELEASE" --strip-components=1
+          if [ "${{ matrix.tag }}" = "arch" ]; then
+            ln -sf /usr/lib/libncursesw.so.6 "$HOME/.swift/swift-6.2-RELEASE/usr/lib/libncurses.so.6"
+            ln -sf /usr/lib/libncursesw.so.6 "$HOME/.swift/swift-6.2-RELEASE/usr/lib/libtinfo.so.6"
+            libxml2_so="$(ls /usr/lib/libxml2.so.[0-9]* 2>/dev/null | sort -V | tail -1 || true)"
+            if [ -n "$libxml2_so" ]; then
+              ln -sf "$libxml2_so" "$HOME/.swift/swift-6.2-RELEASE/usr/lib/libxml2.so.2"
+            fi
+          fi
+          echo "$HOME/.swift/swift-6.2-RELEASE/usr/bin" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=$HOME/.swift/swift-6.2-RELEASE/usr/lib:$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Build RepoBarCore
+        run: swift build --target RepoBarCore
+
+      - name: Build repobarcli
+        run: swift build --product repobarcli
+
+      - name: Sanity check binary
+        run: ./.build/debug/repobarcli --help | head -1
