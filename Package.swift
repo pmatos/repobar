@@ -45,12 +45,23 @@ var targets: [Target] = [
         dependencies: [
             "CZlib",
             .product(name: "Crypto", package: "swift-crypto"),
+            .product(name: "_CryptoExtras", package: "swift-crypto"),
             .product(name: "GRDB", package: "GRDB.swift"),
             .product(name: "Logging", package: "swift-log"),
             .product(name: "Markdown", package: "swift-markdown"),
         ],
         swiftSettings: [
             .enableUpcomingFeature("StrictConcurrency"),
+        ]),
+    .testTarget(
+        name: "RepoBarCoreTests",
+        dependencies: ["RepoBarCore"],
+        resources: [
+            .copy("Fixtures"),
+        ],
+        swiftSettings: [
+            .enableUpcomingFeature("StrictConcurrency"),
+            .enableExperimentalFeature("SwiftTesting"),
         ]),
     .executableTarget(
         name: "repobarcli",
