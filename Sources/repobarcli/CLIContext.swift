@@ -8,11 +8,37 @@ struct AuthContext {
     let host: URL
 }
 
-func makeAuthenticatedClient() async throws -> AuthContext {
-    guard (try? TokenStore.shared.load()) != nil else {
-        throw CLIError.notAuthenticated
-    }
+/// The three ways the CLI can authenticate, in priority order.
+enum CLIAuthSource: Equatable, Sendable {
+    case envToken(String)
+    case storedOAuth
+    case storedPAT(String)
+    case unauthenticated
+}
 
+/// Pick the auth source based on the env var first, then stored credentials.
+///
+/// `env`, `hasOAuth`, and `pat` are injectable so unit tests can exercise the
+/// decision matrix without hitting the real keychain / file store.
+func resolveCLIAuthSource(
+    env: [String: String] = ProcessInfo.processInfo.environment,
+    hasOAuth: Bool = (try? TokenStore.shared.load()) != nil,
+    pat: String? = try? TokenStore.shared.loadPAT()
+) -> CLIAuthSource {
+    let envToken = env["GITHUB_TOKEN"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if envToken.isEmpty == false {
+        return .envToken(envToken)
+    }
+    if hasOAuth {
+        return .storedOAuth
+    }
+    if let pat, pat.isEmpty == false {
+        return .storedPAT(pat)
+    }
+    return .unauthenticated
+}
+
+func makeAuthenticatedClient() async throws -> AuthContext {
     let settings = SettingsStore().load()
     let host = settings.enterpriseHost ?? settings.githubHost
     let apiHost: URL = if let enterprise = settings.enterpriseHost {
@@ -23,9 +49,24 @@ func makeAuthenticatedClient() async throws -> AuthContext {
 
     let client = GitHubClient()
     await client.setAPIHost(apiHost)
-    await client.setTokenProvider { @Sendable () async throws -> OAuthTokens? in
-        try await OAuthTokenRefresher().refreshIfNeeded(host: host)
+
+    switch resolveCLIAuthSource() {
+    case let .envToken(token):
+        await client.setTokenProvider { @Sendable () async throws -> OAuthTokens? in
+            OAuthTokens(accessToken: token, refreshToken: "", expiresAt: nil)
+        }
+    case .storedOAuth:
+        await client.setTokenProvider { @Sendable () async throws -> OAuthTokens? in
+            try await OAuthTokenRefresher().refreshIfNeeded(host: host)
+        }
+    case let .storedPAT(token):
+        await client.setTokenProvider { @Sendable () async throws -> OAuthTokens? in
+            OAuthTokens(accessToken: token, refreshToken: "", expiresAt: nil)
+        }
+    case .unauthenticated:
+        throw CLIError.notAuthenticated
     }
+
     return AuthContext(client: client, settings: settings, host: host)
 }
 

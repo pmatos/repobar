@@ -163,23 +163,11 @@ struct ReposCommand: CommanderRunnableCommand {
             print("RepoBar CLI")
         }
 
-        guard (try? TokenStore.shared.load()) != nil else {
-            throw CLIError.notAuthenticated
-        }
-
-        let settings = SettingsStore().load()
-        let host = settings.enterpriseHost ?? settings.githubHost
-        let apiHost: URL = if let enterprise = settings.enterpriseHost {
-            enterprise.appending(path: "/api/v3")
-        } else {
-            RepoBarAuthDefaults.apiHost
-        }
-
-        let client = GitHubClient()
-        await client.setAPIHost(apiHost)
-        await client.setTokenProvider { @Sendable () async throws -> OAuthTokens? in
-            try await OAuthTokenRefresher().refreshIfNeeded(host: host)
-        }
+        let auth = try await makeAuthenticatedClient()
+        let client = auth.client
+        let settings = auth.settings
+        let host = auth.host
+        _ = host
 
         var ownerFilter = self.ownerFilter
         if self.mine {
