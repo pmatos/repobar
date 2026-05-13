@@ -75,9 +75,9 @@ enum RepoBarCLI {
         LogoutCommand.commandName: LogoutCommand.self,
         ImportGHTokenCommand.commandName: ImportGHTokenCommand.self,
         StatusCommand.commandName: StatusCommand.self,
+        LocalProjectsCommand.commandName: LocalProjectsCommand.self,
         ]
         #if os(macOS)
-        d[LocalProjectsCommand.commandName] = LocalProjectsCommand.self
         d[LocalSyncCommand.commandName] = LocalSyncCommand.self
         d[LocalRebaseCommand.commandName] = LocalRebaseCommand.self
         d[LocalResetCommand.commandName] = LocalResetCommand.self

@@ -184,14 +184,16 @@ extension TokenStore {
     }
 
     /// Linux path resolution: honour `XDG_DATA_HOME` and fall back to
-    /// `~/.local/share/repobar` when it is empty or unset. Public so tests can
-    /// drive the same logic without poking the environment further.
-    static func linuxDefaultFileDirectory() -> URL {
-        let env = ProcessInfo.processInfo.environment
+    /// `~/.local/share/repobar` when it is empty or unset. The env / home
+    /// parameters are injectable so tests don't mutate process-wide state.
+    static func linuxDefaultFileDirectory(
+        env: [String: String] = ProcessInfo.processInfo.environment,
+        home: String = NSHomeDirectory()
+    ) -> URL {
         let xdg = env["XDG_DATA_HOME"]?.trimmingCharacters(in: .whitespaces) ?? ""
         let base: URL
         if xdg.isEmpty {
-            base = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+            base = URL(fileURLWithPath: home, isDirectory: true)
                 .appendingPathComponent(".local", isDirectory: true)
                 .appendingPathComponent("share", isDirectory: true)
         } else {
