@@ -1,5 +1,11 @@
 import Commander
-import Darwin
+#if canImport(Darwin)
+    import Darwin
+#elseif canImport(Glibc)
+    import Glibc
+#elseif canImport(Musl)
+    import Musl
+#endif
 import Foundation
 @testable import repobarcli
 import Testing
@@ -288,14 +294,18 @@ private func captureStdout(_ work: () async throws -> Void) async throws -> Stri
     do {
         try await work()
     } catch {
-        fflush(stdout)
+        #if canImport(Darwin)
+            fflush(stdout)
+        #endif
         dup2(original, STDOUT_FILENO)
         close(original)
         pipe.fileHandleForWriting.closeFile()
         throw error
     }
 
-    fflush(stdout)
+    #if canImport(Darwin)
+        fflush(stdout)
+    #endif
     dup2(original, STDOUT_FILENO)
     close(original)
     pipe.fileHandleForWriting.closeFile()
