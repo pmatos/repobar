@@ -114,6 +114,7 @@ extension GlobalActivityScope: ExpressibleFromArgument {
 enum CLIError: Error {
     case notAuthenticated
     case openFailed
+    case toolMissing(String)
     case unknownCommand(String)
 
     var message: String {
@@ -122,6 +123,8 @@ enum CLIError: Error {
             "No stored login. Run `repobar login` first."
         case .openFailed:
             "Failed to open the browser."
+        case let .toolMissing(name):
+            "Required tool '\(name)' was not found on PATH. Install it or use --no-browser to print the URL manually."
         case let .unknownCommand(command):
             "Unknown command: \(command)"
         }
@@ -196,26 +199,75 @@ func printJSON(_ output: some Encodable) throws {
     }
 }
 
+struct URLOpenPlan: Equatable {
+    let executable: String
+    let arguments: [String]
+    let needsPathLookup: Bool
+}
+
+func planURLOpen(_ url: URL) -> URLOpenPlan {
+    #if canImport(Darwin)
+        return URLOpenPlan(
+            executable: "/usr/bin/open",
+            arguments: [url.absoluteString],
+            needsPathLookup: false)
+    #else
+        return URLOpenPlan(
+            executable: "xdg-open",
+            arguments: [url.absoluteString],
+            needsPathLookup: true)
+    #endif
+}
+
 func openURL(_ url: URL) throws {
+    let plan = planURLOpen(url)
+    try runOpenPlan(plan)
+}
+
+func runOpenPlan(_ plan: URLOpenPlan) throws {
     let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-    process.arguments = [url.absoluteString]
+    if plan.needsPathLookup {
+        guard let path = lookupExecutable(plan.executable) else {
+            throw CLIError.toolMissing(plan.executable)
+        }
+        process.executableURL = URL(fileURLWithPath: path)
+    } else {
+        process.executableURL = URL(fileURLWithPath: plan.executable)
+    }
+    process.arguments = plan.arguments
     try process.run()
     process.waitUntilExit()
     guard process.terminationStatus == 0 else { throw CLIError.openFailed }
 }
 
-func openPath(_ path: String, application: String? = nil) throws {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-    if let application, application.isEmpty == false {
-        process.arguments = ["-a", application, path]
-    } else {
-        process.arguments = [path]
+func lookupExecutable(_ name: String) -> String? {
+    if name.contains("/") { return FileManager.default.isExecutableFile(atPath: name) ? name : nil }
+    let pathEnv = ProcessInfo.processInfo.environment["PATH"] ?? ""
+    for dir in pathEnv.split(separator: ":") {
+        let candidate = "\(dir)/\(name)"
+        if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
     }
-    try process.run()
-    process.waitUntilExit()
-    guard process.terminationStatus == 0 else { throw CLIError.openFailed }
+    return nil
+}
+
+func planOpenPath(_ path: String, application: String? = nil) -> URLOpenPlan {
+    #if canImport(Darwin)
+        let arguments: [String] = if let application, application.isEmpty == false {
+            ["-a", application, path]
+        } else {
+            [path]
+        }
+        return URLOpenPlan(executable: "/usr/bin/open", arguments: arguments, needsPathLookup: false)
+    #else
+        if let application, application.isEmpty == false {
+            return URLOpenPlan(executable: application, arguments: [path], needsPathLookup: true)
+        }
+        return URLOpenPlan(executable: "xdg-open", arguments: [path], needsPathLookup: true)
+    #endif
+}
+
+func openPath(_ path: String, application: String? = nil) throws {
+    try runOpenPlan(planOpenPath(path, application: application))
 }
 
 func parseHost(_ raw: String) throws -> URL {

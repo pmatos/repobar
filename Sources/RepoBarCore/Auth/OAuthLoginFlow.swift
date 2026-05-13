@@ -13,6 +13,27 @@ protocol LoopbackServing: AnyObject {
 
 extension LoopbackServer: LoopbackServing {}
 
+public enum OAuthLoginError: LocalizedError, Equatable {
+    case stateMismatch
+    case missingCode
+    case tokenExchangeFailed(status: Int, body: String?)
+
+    public var errorDescription: String? {
+        switch self {
+        case .stateMismatch:
+            "OAuth callback state did not match the request. Aborting to avoid CSRF; please run `repobar login` again."
+        case .missingCode:
+            "OAuth callback did not include an authorization code. The consent screen may have been cancelled or GitHub returned an error."
+        case let .tokenExchangeFailed(status, body):
+            if let body, body.isEmpty == false {
+                "Token exchange failed (HTTP \(status)): \(body)"
+            } else {
+                "Token exchange failed (HTTP \(status))."
+            }
+        }
+    }
+}
+
 @MainActor
 public struct OAuthLoginFlow {
     private let tokenStore: TokenStore
@@ -87,7 +108,8 @@ public struct OAuthLoginFlow {
         try self.openURL(authorizeURL)
 
         let result = try await server.waitForCallback(timeout: timeout)
-        guard result.state == state else { throw URLError(.badServerResponse) }
+        guard result.state == state else { throw OAuthLoginError.stateMismatch }
+        guard result.code.isEmpty == false else { throw OAuthLoginError.missingCode }
 
         var tokenRequest = URLRequest(url: tokenEndpoint)
         tokenRequest.httpMethod = "POST"
@@ -103,7 +125,11 @@ public struct OAuthLoginFlow {
         ])
 
         let (data, response) = try await self.dataProvider(tokenRequest)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard status == 200 else {
+            let body = String(data: data, encoding: .utf8)
+            throw OAuthLoginError.tokenExchangeFailed(status: status, body: body)
+        }
 
         let decoded = try JSONDecoder().decode(TokenResponse.self, from: data)
         let tokens = OAuthTokens(

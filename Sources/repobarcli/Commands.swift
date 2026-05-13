@@ -375,6 +375,9 @@ struct LoginCommand: CommanderRunnableCommand {
     @Option(name: .customLong("loopback-port"), help: "Loopback port for OAuth callback")
     var loopbackPort: Int?
 
+    @Flag(names: [.customLong("no-browser")], help: "Print the authorization URL instead of launching a browser")
+    var noBrowser: Bool = false
+
     static var commandDescription: CommandDescription {
         CommandDescription(
             commandName: commandName,
@@ -387,6 +390,7 @@ struct LoginCommand: CommanderRunnableCommand {
         self.clientID = try values.decodeOption("clientID")
         self.clientSecret = try values.decodeOption("clientSecret")
         self.loopbackPort = try values.decodeOption("loopbackPort")
+        self.noBrowser = values.flag("noBrowser")
     }
 
     mutating func run() async throws {
@@ -403,9 +407,8 @@ struct LoginCommand: CommanderRunnableCommand {
         }
         let normalizedHost = try OAuthLoginFlow.normalizeHost(rawHost)
 
-        let flow = OAuthLoginFlow(tokenStore: .shared) { url in
-            try openURL(url)
-        }
+        let prompt = LoginPrompt.interactive(noBrowser: self.noBrowser)
+        let flow = OAuthLoginFlow(tokenStore: .shared, openURL: prompt.openURL)
         _ = try await flow.login(
             clientID: self.clientID ?? RepoBarAuthDefaults.clientID,
             clientSecret: self.clientSecret ?? RepoBarAuthDefaults.clientSecret,

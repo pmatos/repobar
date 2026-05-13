@@ -219,7 +219,7 @@ private func rootHelpText() -> String {
       repobar cache clear [--json] [--plain]
       repobar settings show [--json] [--plain]
       repobar settings set <key> <value> [--json] [--plain]
-      repobar login [--host URL] [--client-id ID] [--client-secret SECRET] [--loopback-port PORT]
+      repobar login [--host URL] [--client-id ID] [--client-secret SECRET] [--loopback-port PORT] [--no-browser]
       repobar logout
       repobar import-gh-token [--host URL]
       repobar status [--json]
@@ -750,7 +750,14 @@ func printHelp(_ target: HelpTarget) {
         repobar login - sign in via browser OAuth
 
         Usage:
-          repobar login [--host URL] [--client-id ID] [--client-secret SECRET] [--loopback-port PORT]
+          repobar login [--host URL] [--client-id ID] [--client-secret SECRET] [--loopback-port PORT] [--no-browser]
+
+        Options:
+          --host URL          GitHub host (default: github.com or stored enterprise host)
+          --client-id ID      GitHub App OAuth client ID
+          --client-secret S   GitHub App OAuth client secret
+          --loopback-port P   Loopback port for OAuth callback
+          --no-browser        Print the authorization URL instead of opening it
         """
     case .logout:
         """
