@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
+
 /// Minimal GraphQL helper (no codegen) to enrich repo data. Uses the same OAuth token as REST.
 actor GraphQLClient {
     private var endpoint: URL = .init(string: "https://api.github.com/graphql")!

@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
+
 private struct GitHubReferenceCacheLookupContext {
     let baseURL: URL
     let cache: HTTPResponseDiskCache

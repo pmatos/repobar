@@ -1,6 +1,6 @@
+import CZlib
 import Foundation
 @preconcurrency import GRDB
-import zlib
 
 public struct GitHubArchiveImportResult: Codable, Equatable, Sendable {
     public let sourceName: String

@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
+
 /// Simple in-memory ETag cache keyed by URL string.
 actor ETagCache {
     private static let defaultMaxEntries = 512

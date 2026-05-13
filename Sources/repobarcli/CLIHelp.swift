@@ -92,6 +92,7 @@ enum HelpTarget: String {
             return .commits
         case ActivityCommand.commandName:
             return .activity
+        #if os(macOS)
         case LocalProjectsCommand.commandName:
             return .local
         case LocalSyncCommand.commandName:
@@ -110,6 +111,7 @@ enum HelpTarget: String {
             return .openTerminal
         case CheckoutCommand.commandName:
             return .checkout
+        #endif
         case RefreshCommand.commandName:
             return .refresh
         case ContributionsCommand.commandName:

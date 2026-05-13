@@ -1,3 +1,4 @@
+#if os(macOS)
 import Commander
 import Foundation
 import RepoBarCore
@@ -378,3 +379,4 @@ struct CheckoutCommand: CommanderRunnableCommand {
         print("Checked out \(repoName) → \(PathFormatter.displayString(destinationURL.path))")
     }
 }
+#endif

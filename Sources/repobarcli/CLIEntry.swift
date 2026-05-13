@@ -35,7 +35,8 @@ enum RepoBarCLI {
         return command
     }
 
-    private static let commandRegistry: [String: CommanderRunnableCommand.Type] = [
+    private static let commandRegistry: [String: CommanderRunnableCommand.Type] = {
+        var d: [String: CommanderRunnableCommand.Type] = [
         ReposCommand.commandName: ReposCommand.self,
         RepoCommand.commandName: RepoCommand.self,
         IssuesCommand.commandName: IssuesCommand.self,
@@ -48,15 +49,6 @@ enum RepoBarCLI {
         ContributorsCommand.commandName: ContributorsCommand.self,
         CommitsCommand.commandName: CommitsCommand.self,
         ActivityCommand.commandName: ActivityCommand.self,
-        LocalProjectsCommand.commandName: LocalProjectsCommand.self,
-        LocalSyncCommand.commandName: LocalSyncCommand.self,
-        LocalRebaseCommand.commandName: LocalRebaseCommand.self,
-        LocalResetCommand.commandName: LocalResetCommand.self,
-        LocalBranchesCommand.commandName: LocalBranchesCommand.self,
-        WorktreesCommand.commandName: WorktreesCommand.self,
-        OpenFinderCommand.commandName: OpenFinderCommand.self,
-        OpenTerminalCommand.commandName: OpenTerminalCommand.self,
-        CheckoutCommand.commandName: CheckoutCommand.self,
         RefreshCommand.commandName: RefreshCommand.self,
         ContributionsCommand.commandName: ContributionsCommand.self,
         ChangelogCommand.commandName: ChangelogCommand.self,
@@ -82,8 +74,21 @@ enum RepoBarCLI {
         LoginCommand.commandName: LoginCommand.self,
         LogoutCommand.commandName: LogoutCommand.self,
         ImportGHTokenCommand.commandName: ImportGHTokenCommand.self,
-        StatusCommand.commandName: StatusCommand.self
-    ]
+        StatusCommand.commandName: StatusCommand.self,
+        ]
+        #if os(macOS)
+        d[LocalProjectsCommand.commandName] = LocalProjectsCommand.self
+        d[LocalSyncCommand.commandName] = LocalSyncCommand.self
+        d[LocalRebaseCommand.commandName] = LocalRebaseCommand.self
+        d[LocalResetCommand.commandName] = LocalResetCommand.self
+        d[LocalBranchesCommand.commandName] = LocalBranchesCommand.self
+        d[WorktreesCommand.commandName] = WorktreesCommand.self
+        d[OpenFinderCommand.commandName] = OpenFinderCommand.self
+        d[OpenTerminalCommand.commandName] = OpenTerminalCommand.self
+        d[CheckoutCommand.commandName] = CheckoutCommand.self
+        #endif
+        return d
+    }()
 
     private static func handleError(_ error: Error) {
         let message: String = switch error {
