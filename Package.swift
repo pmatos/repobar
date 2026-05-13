@@ -16,6 +16,17 @@ var dependencies: [Package.Dependency] = [
     .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.10.0"),
 ]
 
+// AsyncHTTPClient is the HTTP backend on Linux. On macOS / iOS the platform's
+// URLSession is already strong enough so we don't pull NIO in there. swift-nio
+// is added explicitly so we can pull the `NIOFoundationCompat` product (the
+// AsyncHTTPClient package re-exports only a subset of NIO products).
+#if !os(macOS) && !os(iOS)
+    dependencies += [
+        .package(url: "https://github.com/swift-server/async-http-client", from: "1.21.0"),
+        .package(url: "https://github.com/apple/swift-nio", from: "2.65.0"),
+    ]
+#endif
+
 // macOS-only deps. `apollo-ios` does not build on Linux (URLRequest /
 // FoundationNetworking + Sendable issues with HTTPURLResponse). The remaining
 // packages are tied to AppKit / SwiftUI. RepoBarCore's runtime currently uses
@@ -42,14 +53,23 @@ var targets: [Target] = [
         ]),
     .target(
         name: "RepoBarCore",
-        dependencies: [
-            "CZlib",
-            .product(name: "Crypto", package: "swift-crypto"),
-            .product(name: "_CryptoExtras", package: "swift-crypto"),
-            .product(name: "GRDB", package: "GRDB.swift"),
-            .product(name: "Logging", package: "swift-log"),
-            .product(name: "Markdown", package: "swift-markdown"),
-        ],
+        dependencies: {
+            var deps: [Target.Dependency] = [
+                "CZlib",
+                .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "_CryptoExtras", package: "swift-crypto"),
+                .product(name: "GRDB", package: "GRDB.swift"),
+                .product(name: "Logging", package: "swift-log"),
+                .product(name: "Markdown", package: "swift-markdown"),
+            ]
+            #if !os(macOS) && !os(iOS)
+                deps += [
+                    .product(name: "AsyncHTTPClient", package: "async-http-client"),
+                    .product(name: "NIOFoundationCompat", package: "swift-nio"),
+                ]
+            #endif
+            return deps
+        }(),
         swiftSettings: [
             .enableUpcomingFeature("StrictConcurrency"),
         ]),
