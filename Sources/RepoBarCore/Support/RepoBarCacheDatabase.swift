@@ -150,13 +150,37 @@ final class HTTPResponseDiskCache {
     }
 
     static func standardDatabaseURL(fileManager: FileManager = .default) -> URL? {
-        guard let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            return nil
-        }
+        #if os(Linux)
+            return linuxCacheURL()
+        #else
+            guard let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+                return nil
+            }
 
+            return base
+                .appending(path: "RepoBar", directoryHint: .isDirectory)
+                .appending(path: "Cache.sqlite", directoryHint: .notDirectory)
+        #endif
+    }
+
+    /// Linux cache location: `$XDG_CACHE_HOME/repobar/cache.sqlite`, falling
+    /// back to `$HOME/.cache/repobar/cache.sqlite` when the env var is unset.
+    /// Visible for testing so the unit test can drive the same logic.
+    static func linuxCacheURL(
+        env: [String: String] = ProcessInfo.processInfo.environment,
+        home: String = NSHomeDirectory()
+    ) -> URL {
+        let xdg = env["XDG_CACHE_HOME"]?.trimmingCharacters(in: .whitespaces) ?? ""
+        let base: URL
+        if xdg.isEmpty {
+            base = URL(fileURLWithPath: home, isDirectory: true)
+                .appendingPathComponent(".cache", isDirectory: true)
+        } else {
+            base = URL(fileURLWithPath: xdg, isDirectory: true)
+        }
         return base
-            .appending(path: "RepoBar", directoryHint: .isDirectory)
-            .appending(path: "Cache.sqlite", directoryHint: .notDirectory)
+            .appendingPathComponent("repobar", isDirectory: true)
+            .appendingPathComponent("cache.sqlite", isDirectory: false)
     }
 
     func cached(url: URL) -> PersistentHTTPResponse? {
