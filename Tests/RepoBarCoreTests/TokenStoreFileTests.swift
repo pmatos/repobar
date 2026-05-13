@@ -71,20 +71,29 @@ struct TokenStoreFileTests {
 
         @Test("default Linux file directory honours XDG_DATA_HOME")
         func defaultDirectoryHonoursXDG() {
-            // Resolve via the same private path the default uses; we shadow the
-            // environment, then call defaultFileDirectory().
-            setenv("XDG_DATA_HOME", "/tmp/xdg-test-aaaa", 1)
-            defer { unsetenv("XDG_DATA_HOME") }
-            let dir = TokenStore.defaultFileDirectory().path
-            #expect(dir.hasPrefix("/tmp/xdg-test-aaaa/repobar"))
+            let dir = TokenStore.linuxDefaultFileDirectory(
+                env: ["XDG_DATA_HOME": "/tmp/xdg-test-aaaa"],
+                home: "/home/anyone"
+            ).path
+            #expect(dir == "/tmp/xdg-test-aaaa/repobar")
         }
 
         @Test("default Linux file directory falls back to ~/.local/share/repobar")
-        func defaultDirectoryFallback() throws {
-            unsetenv("XDG_DATA_HOME")
-            let dir = TokenStore.defaultFileDirectory().path
-            let home = NSHomeDirectory()
-            #expect(dir == "\(home)/.local/share/repobar")
+        func defaultDirectoryFallback() {
+            let dir = TokenStore.linuxDefaultFileDirectory(
+                env: [:],
+                home: "/home/anyone"
+            ).path
+            #expect(dir == "/home/anyone/.local/share/repobar")
+        }
+
+        @Test("XDG_DATA_HOME set to an empty string falls back to HOME")
+        func defaultDirectoryEmptyXDG() {
+            let dir = TokenStore.linuxDefaultFileDirectory(
+                env: ["XDG_DATA_HOME": "  "],
+                home: "/home/anyone"
+            ).path
+            #expect(dir == "/home/anyone/.local/share/repobar")
         }
     #endif
 }

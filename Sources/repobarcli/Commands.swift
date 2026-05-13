@@ -46,10 +46,10 @@ struct RepoBarRoot: ParsableCommand {
             LogoutCommand.self,
             ImportGHTokenCommand.self,
             StatusCommand.self,
+            LocalProjectsCommand.self,
         ]
         #if os(macOS)
         subcommands += [
-            LocalProjectsCommand.self,
             LocalSyncCommand.self,
             LocalRebaseCommand.self,
             LocalResetCommand.self,

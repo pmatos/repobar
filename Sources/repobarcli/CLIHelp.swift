@@ -92,9 +92,9 @@ enum HelpTarget: String {
             return .commits
         case ActivityCommand.commandName:
             return .activity
-        #if os(macOS)
         case LocalProjectsCommand.commandName:
             return .local
+        #if os(macOS)
         case LocalSyncCommand.commandName:
             return .localSync
         case LocalRebaseCommand.commandName:
