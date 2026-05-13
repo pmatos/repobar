@@ -1,9 +1,7 @@
 import Foundation
-
-#if canImport(Network)
-    import Darwin
-    import Network
-#endif
+import NIOCore
+import NIOHTTP1
+import NIOPosix
 
 /// Error thrown when the loopback server cannot start.
 public enum LoopbackServerError: LocalizedError {
@@ -23,168 +21,183 @@ public enum LoopbackServerError: LocalizedError {
     }
 }
 
-#if canImport(Network)
-    /// Minimal one-shot HTTP loopback listener to capture OAuth redirects.
-    @MainActor
-    public final class LoopbackServer {
-        private let port: UInt16
-        private var listener: NWListener?
-        private var continuation: CheckedContinuation<(code: String, state: String), Error>?
-        private var pendingResult: (code: String, state: String)?
+/// Minimal one-shot HTTP loopback listener to capture OAuth redirects.
+///
+/// Single SwiftNIO-backed implementation across macOS and Linux. Binds to
+/// `127.0.0.1:<port>`, accepts the first GET request, parses the code/state
+/// query params, sends a small success page back, then resolves
+/// `waitForCallback` with the parsed values.
+@MainActor
+public final class LoopbackServer {
+    private let port: Int
+    private let group: MultiThreadedEventLoopGroup
+    private var channel: Channel?
+    private var continuation: CheckedContinuation<(code: String, state: String), Error>?
+    private var pendingResult: (code: String, state: String)?
 
-        public init(port: Int) {
-            self.port = UInt16(port)
+    public init(port: Int) {
+        self.port = port
+        self.group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+    }
+
+    deinit {
+        try? group.syncShutdownGracefully()
+    }
+
+    public func start() throws -> URL {
+        let handler = LoopbackHandler { [weak self] code, state in
+            // Hop onto the MainActor before touching our state.
+            Task { @MainActor [weak self] in
+                self?.deliver(code: code, state: state)
+            }
         }
 
-        public func start() throws -> URL {
-            // Check if port is available before attempting to bind
-            if Self.isPortInUse(Int(self.port)) {
-                throw LoopbackServerError.portInUse(port: Int(self.port))
-            }
-
-            let listener: NWListener
-            do {
-                listener = try NWListener(using: .tcp, on: NWEndpoint.Port(rawValue: self.port)!)
-            } catch {
-                throw LoopbackServerError.bindFailed(port: Int(self.port), underlying: error)
-            }
-
-            self.listener = listener
-            listener.newConnectionHandler = { [weak self] connection in
-                Task { @MainActor [weak self] in
-                    self?.handle(connection: connection)
+        let bootstrap = ServerBootstrap(group: group)
+            .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
+            .childChannelInitializer { channel in
+                channel.pipeline.configureHTTPServerPipeline().flatMap {
+                    channel.pipeline.addHandler(handler)
                 }
             }
-            listener.start(queue: .main)
-            return URL(string: "http://127.0.0.1:\(self.port)/callback")!
+
+        do {
+            let channel = try bootstrap.bind(host: "127.0.0.1", port: self.port).wait()
+            self.channel = channel
+        } catch let error as IOError where error.errnoCode == EADDRINUSE {
+            throw LoopbackServerError.portInUse(port: self.port)
+        } catch {
+            // SwiftNIO surfaces NIOCore.IOError; some platforms wrap the
+            // address-in-use case differently. Treat any bind failure whose
+            // message mentions the well-known errno as portInUse for friendlier
+            // CLI output.
+            let message = String(describing: error).lowercased()
+            if message.contains("address already in use") || message.contains("eaddrinuse") {
+                throw LoopbackServerError.portInUse(port: self.port)
+            }
+            throw LoopbackServerError.bindFailed(port: self.port, underlying: error)
         }
 
-        /// Checks if a port is currently in use by attempting a connection.
-        private nonisolated static func isPortInUse(_ port: Int) -> Bool {
-            var addr = sockaddr_in()
-            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-            addr.sin_family = sa_family_t(AF_INET)
-            addr.sin_port = UInt16(port).bigEndian
-            addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        return URL(string: "http://127.0.0.1:\(self.port)/callback")!
+    }
 
-            let sock = socket(AF_INET, SOCK_STREAM, 0)
-            guard sock >= 0 else { return false }
-
-            defer { close(sock) }
-
-            let connectResult = withUnsafePointer(to: &addr) { ptr in
-                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
-                    connect(sock, sockPtr, socklen_t(MemoryLayout<sockaddr_in>.size))
-                }
-            }
-            return connectResult == 0
-        }
-
-        public func waitForCallback(timeout: TimeInterval = 180) async throws -> (code: String, state: String) {
-            if let pendingResult {
-                self.pendingResult = nil
-                self.stop()
-                return pendingResult
-            }
-
-            let timeoutTask = Task { @MainActor in
-                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                if let continuation {
-                    continuation.resume(throwing: URLError(.timedOut))
-                    self.continuation = nil
-                }
-            }
-            let result = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<
-                (code: String, state: String),
-                Error
-            >) in
-                self.continuation = cont
-            }
-            timeoutTask.cancel()
-            self.stop()
-            return result
-        }
-
-        public func stop() {
-            self.listener?.cancel()
-            self.listener = nil
-            self.continuation = nil
+    public func waitForCallback(timeout: TimeInterval = 180) async throws -> (code: String, state: String) {
+        if let pendingResult {
             self.pendingResult = nil
+            self.stop()
+            return pendingResult
         }
 
-        private func handle(connection: NWConnection) {
-            connection.start(queue: .main)
-            connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self] data, _, _, _ in
-                Task { @MainActor [weak self] in
-                    guard let self, let data, let request = String(data: data, encoding: .utf8) else { return }
-                    guard let parsed = Self.parse(request: request) else { return }
-
-                    let response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 7\r\n\r\nSuccess"
-                    connection.send(content: response.data(using: .utf8), completion: .contentProcessed { [weak self] _ in
-                        connection.cancel()
-                        Task { @MainActor in self?.listener?.cancel() }
-                    })
-                    if let continuation {
-                        continuation.resume(returning: parsed)
-                        self.continuation = nil
-                    } else {
-                        self.pendingResult = parsed
-                    }
-                }
+        let timeoutTask = Task { @MainActor in
+            try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            if let continuation {
+                continuation.resume(throwing: URLError(.timedOut))
+                self.continuation = nil
             }
         }
-
-        /// Pure parser to ease testing.
-        public nonisolated static func parse(request: String) -> (code: String, state: String)? {
-            Self.parseRequest(request)
+        let result = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<
+            (code: String, state: String),
+            Error
+        >) in
+            self.continuation = cont
         }
+        timeoutTask.cancel()
+        self.stop()
+        return result
+    }
 
-        // Defer to the cross-platform implementation so the macOS parser and the
-        // Linux stub share one source of truth.
-        private nonisolated static func parseRequest(_ request: String) -> (code: String, state: String)? {
-            LoopbackServerParser.parse(request: request)
+    public func stop() {
+        if let channel {
+            // Best-effort close; ignore errors because stop is also called from
+            // the deinit / cancellation paths where the channel may already be
+            // gone.
+            try? channel.close().wait()
+            self.channel = nil
+        }
+        self.continuation = nil
+        self.pendingResult = nil
+    }
+
+    private func deliver(code: String, state: String) {
+        if let continuation {
+            continuation.resume(returning: (code, state))
+            self.continuation = nil
+        } else {
+            self.pendingResult = (code, state)
         }
     }
-#else
-    /// Linux placeholder. Mirrors the macOS class's surface so call sites compile;
-    /// the OAuth login slice (#9) replaces this with a real SwiftNIO-backed
-    /// implementation. Until then, any attempt to start one fails cleanly.
-    @MainActor
-    public final class LoopbackServer {
-        private let port: Int
 
-        public init(port: Int) {
-            self.port = port
-        }
-
-        public func start() throws -> URL {
-            throw LoopbackServerError.notImplemented
-        }
-
-        public func waitForCallback(timeout: TimeInterval = 180) async throws -> (code: String, state: String) {
-            throw LoopbackServerError.notImplemented
-        }
-
-        public func stop() { /* no-op */ }
-
-        /// Pure parser to ease testing. Identical to the macOS implementation.
-        public nonisolated static func parse(request: String) -> (code: String, state: String)? {
-            LoopbackServerParser.parse(request: request)
-        }
+    /// Pure parser kept on the type for backwards compatibility. Backed by the
+    /// shared parser so the macOS impl and the Linux impl share one source of
+    /// truth.
+    public nonisolated static func parse(request: String) -> (code: String, state: String)? {
+        LoopbackServerParser.parse(request: request)
     }
-#endif
+}
 
-/// Cross-platform parser for the OAuth redirect line shape. Lives outside the
-/// class so the macOS impl and the Linux stub share one source of truth.
+/// Cross-platform parser for the OAuth redirect line shape.
 enum LoopbackServerParser {
     static func parse(request: String) -> (code: String, state: String)? {
         guard let firstLine = request.components(separatedBy: "\r\n").first,
               let range = firstLine.range(of: "GET ") else { return nil }
 
         let pathPart = firstLine[range.upperBound...].split(separator: " ").first ?? "" as Substring
-        let components = URLComponents(string: "http://localhost\(pathPart)")
+        return parse(uri: String(pathPart))
+    }
+
+    static func parse(uri: String) -> (code: String, state: String)? {
+        let components = URLComponents(string: "http://localhost\(uri)")
         let code = components?.queryItems?.first(where: { $0.name == "code" })?.value ?? ""
         let state = components?.queryItems?.first(where: { $0.name == "state" })?.value ?? ""
         return (code, state)
+    }
+}
+
+private final class LoopbackHandler: ChannelInboundHandler, @unchecked Sendable {
+    typealias InboundIn = HTTPServerRequestPart
+    typealias OutboundOut = HTTPServerResponsePart
+
+    private let onCapture: @Sendable (_ code: String, _ state: String) -> Void
+    private var capturedURI: String?
+    private var didRespond = false
+
+    init(onCapture: @escaping @Sendable (_ code: String, _ state: String) -> Void) {
+        self.onCapture = onCapture
+    }
+
+    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        let part = self.unwrapInboundIn(data)
+        switch part {
+        case let .head(head):
+            self.capturedURI = head.uri
+        case .body:
+            // OAuth redirects don't have meaningful bodies.
+            break
+        case .end:
+            guard self.didRespond == false else { return }
+            self.didRespond = true
+            let uri = self.capturedURI ?? "/"
+            let parsed = LoopbackServerParser.parse(uri: uri) ?? ("", "")
+            self.respondWithSuccess(context: context)
+            self.onCapture(parsed.code, parsed.state)
+        }
+    }
+
+    private func respondWithSuccess(context: ChannelHandlerContext) {
+        let body = "Success — you can close this tab."
+        let buffer = context.channel.allocator.buffer(string: body)
+
+        var headers = HTTPHeaders()
+        headers.add(name: "Content-Type", value: "text/plain; charset=utf-8")
+        headers.add(name: "Content-Length", value: String(buffer.readableBytes))
+        headers.add(name: "Connection", value: "close")
+
+        let head = HTTPResponseHead(version: .init(major: 1, minor: 1), status: .ok, headers: headers)
+        context.write(self.wrapOutboundOut(.head(head)), promise: nil)
+        context.write(self.wrapOutboundOut(.body(.byteBuffer(buffer))), promise: nil)
+        let endPromise = context.eventLoop.makePromise(of: Void.self)
+        context.writeAndFlush(self.wrapOutboundOut(.end(nil)), promise: endPromise)
+        endPromise.futureResult.whenComplete { _ in
+            context.close(promise: nil)
+        }
     }
 }
