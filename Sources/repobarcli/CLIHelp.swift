@@ -170,8 +170,30 @@ enum HelpTarget: String {
     }
 }
 
-private func rootHelpText() -> String {
+func rootHelpText() -> String {
+    // Local actions that touch the user's working copy (`local sync`,
+    // `local rebase`, `local reset`, `local branches`, `worktrees`,
+    // `open finder`, `open terminal`, `checkout`) are macOS-only — they
+    // call into `NSWorkspace` / Finder / a configured Terminal app, none
+    // of which have direct Linux equivalents. The corresponding `Command`
+    // types in `Commands.swift` are gated behind `#if os(macOS)` too; the
+    // help text is kept in sync via the same gate here.
+    #if os(macOS)
+    let macOnlyLocalActions = """
+      repobar local sync <path|owner/name> [--json] [--plain]
+      repobar local rebase <path|owner/name> [--json] [--plain]
+      repobar local reset <path|owner/name> [--yes] [--json] [--plain]
+      repobar local branches <path|owner/name> [--json] [--plain]
+      repobar worktrees <path|owner/name> [--json] [--plain]
+      repobar open finder <path|owner/name>
+      repobar open terminal <path|owner/name>
+      repobar checkout <owner/name> [--root PATH] [--destination PATH] [--open] [--json] [--plain]
     """
+    #else
+    let macOnlyLocalActions = ""
+    #endif
+
+    let usageHeader = """
     repobar - list repositories by activity, issues, PRs, stars
 
     Usage:
@@ -189,14 +211,9 @@ private func rootHelpText() -> String {
       repobar commits [<owner/name>|<login>] [--limit N] [--scope VAL] [--login USER] [--json] [--plain]
       repobar activity [<owner/name>|<login>] [--limit N] [--scope VAL] [--login USER] [--include-repos] [--json] [--plain]
       repobar local [--root PATH] [--depth N] [--sync] [--limit N] [--json] [--plain]
-      repobar local sync <path|owner/name> [--json] [--plain]
-      repobar local rebase <path|owner/name> [--json] [--plain]
-      repobar local reset <path|owner/name> [--yes] [--json] [--plain]
-      repobar local branches <path|owner/name> [--json] [--plain]
-      repobar worktrees <path|owner/name> [--json] [--plain]
-      repobar open finder <path|owner/name>
-      repobar open terminal <path|owner/name>
-      repobar checkout <owner/name> [--root PATH] [--destination PATH] [--open] [--json] [--plain]
+    """
+
+    let usageTail = """
       repobar refresh [--json] [--plain]
       repobar contributions [--login USER] [--json] [--plain]
       repobar changelog [path] [--release TAG] [--json] [--plain]
@@ -243,6 +260,15 @@ private func rootHelpText() -> String {
       --no-color   Disable color output
       -h, --help   Show help
     """
+
+    // Stitch the three sections together. On macOS the local-action lines
+    // are appended between the cross-platform header and tail; on Linux
+    // they vanish entirely, matching the runtime set of registered
+    // subcommands.
+    if macOnlyLocalActions.isEmpty {
+        return usageHeader + "\n" + usageTail
+    }
+    return usageHeader + "\n" + macOnlyLocalActions + "\n" + usageTail
 }
 
 func printHelp(_ target: HelpTarget) {

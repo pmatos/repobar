@@ -70,16 +70,31 @@ The file store lives under `~/Library/Application Support/RepoBar/DebugAuth`. Se
   - `--include-repos` merges cached repository activity, matching the profile submenu.
 - `local`: scan local project folder for git repos.
   - Flags: `--root`, `--depth`, `--sync`, `--limit`.
-- `local sync <path|owner/name>`: fast-forward local repo (fetch/rebase/push).
-- `local rebase <path|owner/name>`: rebase local repo.
-- `local reset <path|owner/name>`: hard reset local repo.
+- `local sync <path|owner/name>`: fast-forward local repo (fetch/rebase/push). **(macOS only)**
+- `local rebase <path|owner/name>`: rebase local repo. **(macOS only)**
+- `local reset <path|owner/name>`: hard reset local repo. **(macOS only)**
   - Flags: `--yes` (skip confirmation).
-- `local branches <path|owner/name>`: list local branches.
-- `worktrees <path|owner/name>`: list local worktrees.
-- `open finder <path|owner/name>`: open in Finder.
-- `open terminal <path|owner/name>`: open in Terminal (respects preferred terminal setting).
-- `checkout <owner/name>`: clone repo into Local Projects root.
+- `local branches <path|owner/name>`: list local branches. **(macOS only)**
+- `worktrees <path|owner/name>`: list local worktrees. **(macOS only)**
+- `open finder <path|owner/name>`: open in Finder. **(macOS only)**
+- `open terminal <path|owner/name>`: open in Terminal (respects preferred terminal setting). **(macOS only)**
+- `checkout <owner/name>`: clone repo into Local Projects root. **(macOS only)**
   - Flags: `--root`, `--destination`, `--open`.
+
+### macOS-only commands
+
+The eight commands tagged **(macOS only)** above all reach for Finder, a
+configured macOS Terminal app, or Cocoa-only file-coordination machinery
+that has no direct Linux equivalent. They are excluded at compile time
+under `#if os(macOS)` (see `Sources/repobarcli/Commands.swift` and the
+matching gate in `Sources/repobarcli/CLIHelp.swift`'s `rootHelpText`).
+On Linux they are not advertised in `repobar --help`, and invoking them
+exits non-zero with `Error: Unknown subcommand '<name>' for command
+'repobar'`.
+
+Linux contributors who need equivalent functionality should drive the
+underlying `git`/desktop primitives directly (e.g. `git fetch --prune`,
+`xdg-open <path>`) or file a follow-up that proposes a portable design.
 - `refresh`: refresh pinned repositories using current settings.
 - `contributions`: fetch contribution heatmap for a user.
   - Flags: `--login`.
